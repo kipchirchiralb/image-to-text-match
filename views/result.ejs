@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <%- include('partials-head') %>
+  <title>Search Result</title>
+</head>
+<body>
+  <main class="card">
+    <a href="/" class="back">&larr; New search</a>
+    <h1>Result for &ldquo;<%= query %>&rdquo;</h1>
+
+    <%
+      const pct = best ? best.percent : 0;
+      const tone = pct >= 80 ? 'good' : pct >= 50 ? 'ok' : 'bad';
+      const renderSegments = (segments) => segments
+        .map(s => s.hit ? '<mark>' + escapeFn(s.text) + '</mark>' : escapeFn(s.text))
+        .join('');
+      function escapeFn(t) {
+        return String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+      }
+    %>
+
+    <div class="score <%= tone %>">
+      <div class="pct"><%= pct %>%</div>
+      <div>
+        <% if (best) { %>
+          Best match: <strong><%- renderSegments(best.segments) %></strong>
+          <div class="muted">Line <%= best.lineNumber %>: <%= best.line %></div>
+        <% } else { %>
+          No match found in the image text.
+        <% } %>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div>
+        <img src="<%= imageUrl %>" alt="Uploaded image" class="preview">
+        <p class="muted small">
+          Uploaded &ldquo;<%= originalName %>&rdquo;, stored as <code><%= storedAs %></code>.<br>
+          OCR confidence <%= ocrConfidence %>%, processed in <%= ms %> ms.
+        </p>
+      </div>
+
+      <div>
+        <h2>All matches</h2>
+        <% if (matches.length) { %>
+          <table>
+            <thead><tr><th>Match</th><th>Matched text</th><th>Line</th></tr></thead>
+            <tbody>
+            <% matches.forEach(m => { %>
+              <tr>
+                <td class="nowrap"><span class="bar"><span style="width: <%= m.percent %>%"></span></span> <%= m.percent %>%</td>
+                <td><%- renderSegments(m.segments) %></td>
+                <td><%= m.lineNumber %></td>
+              </tr>
+            <% }) %>
+            </tbody>
+          </table>
+        <% } else { %>
+          <p class="muted">Nothing scored above 30%.</p>
+        <% } %>
+
+        <details>
+          <summary>Raw OCR text</summary>
+          <pre><%= ocrText %></pre>
+        </details>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

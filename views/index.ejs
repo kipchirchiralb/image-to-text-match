@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <%- include('partials-head') %>
+  <title>OCR Fuzzy Search</title>
+</head>
+<body>
+  <main class="card">
+    <h1>OCR + Fuzzy Search</h1>
+    <p class="muted">
+      Upload an image, type the text you are looking for, and get a match percentage.
+      No LLM: Tesseract.js reads the image and <code>fuzzy</code> scores the match.
+    </p>
+
+    <% if (error) { %><div class="error"><%= error %></div><% } %>
+
+    <form action="/search" method="post" enctype="multipart/form-data" id="form">
+      <label>Image
+        <input type="file" name="image" accept="image/*" required id="file">
+      </label>
+      <img id="preview" class="preview" alt="" hidden>
+
+      <label>Text to search for
+        <input type="text" name="query" value="<%= query %>" placeholder="e.g. Date of Birth" required>
+      </label>
+
+      <button type="submit" id="btn">Upload &amp; search</button>
+    </form>
+  </main>
+
+  <script>
+    const file = document.getElementById('file');
+    const preview = document.getElementById('preview');
+    file.addEventListener('change', () => {
+      const f = file.files[0];
+      if (!f) { preview.hidden = true; return; }
+      preview.src = URL.createObjectURL(f);
+      preview.hidden = false;
+    });
+    document.getElementById('form').addEventListener('submit', () => {
+      const btn = document.getElementById('btn');
+      btn.disabled = true;
+      btn.textContent = 'Reading image... (first run downloads OCR data)';
+    });
+  </script>
+</body>
+</html>
