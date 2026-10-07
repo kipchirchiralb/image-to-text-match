@@ -1,9 +1,13 @@
+require('dotenv').config({ quiet: true });
+
+const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const multer = require('multer');
 const { upload } = require('./src/upload');
 const { recognize, shutdown } = require('./src/ocr');
 const { searchText } = require('./src/search');
+const { sendReport, normalizePhone } = require('./src/sms');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -11,37 +15,41 @@ const PORT = process.env.PORT || 3000;
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.get('/', (req, res) => {
-  res.render('index', { error: null, query: '' });
+  res.render('index', { error: null, query: '', phone: '' });
 });
 
 // HTML form flow: upload image + query, render the match percentage.
 app.post('/search', (req, res) => {
   upload.single('image')(req, res, async (err) => {
     const query = (req.body && req.body.query) || '';
+    const phoneInput = (req.body && req.body.phone) || '';
+    const fail = (status, error) => res.status(status).render('index', { error, query, phone: phoneInput });
 
     if (err) {
       const message =
         err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE'
           ? 'Image is too large (max 10 MB).'
           : err.message;
-      return res.status(400).render('index', { error: message, query });
+      return fail(400, message);
     }
-    if (!req.file) return res.status(400).render('index', { error: 'Please choose an image.', query });
-    if (!query.trim()) {
-      return res.status(400).render('index', { error: 'Please enter the text to search for.', query });
-    }
+    if (!req.file) return fail(400, 'Please choose an image.');
+    if (!query.trim()) return fail(400, 'Please enter the text to search for.');
+    const phone = normalizePhone(phoneInput);
+    if (!phone) return fail(400, 'Please enter a valid phone number, e.g. +254712345678.');
 
     try {
       const started = Date.now();
       const ocr = await recognize(req.file.path);
       const { best, matches } = searchText(ocr.text, query);
+      const sms = await sendReport(phone, query, best);
+      // uploads/ is not served publicly, so inline the image for this one response.
+      const image = await fs.promises.readFile(req.file.path);
 
       res.render('result', {
         query,
-        imageUrl: `/uploads/${encodeURIComponent(req.file.filename)}`,
+        imageUrl: `data:${req.file.mimetype};base64,${image.toString('base64')}`,
         storedAs: req.file.filename,
         originalName: req.file.originalname,
         ocrText: ocr.text,
@@ -49,23 +57,27 @@ app.post('/search', (req, res) => {
         best,
         matches,
         ms: Date.now() - started,
+        sms,
       });
     } catch (e) {
       console.error(e);
-      res.status(500).render('index', { error: `OCR failed: ${e.message}`, query });
+      fail(500, `OCR failed: ${e.message}`);
     }
   });
 });
 
-// JSON flow: POST multipart/form-data with fields "image" and "query".
+// JSON flow: POST multipart/form-data with fields "image", "query" and optional "phone".
 app.post('/api/search', upload.single('image'), async (req, res) => {
   const query = (req.body && req.body.query) || '';
   if (!req.file || !query.trim()) {
     return res.status(400).json({ error: 'Both "image" and "query" are required.' });
   }
+  const phone = req.body.phone ? normalizePhone(req.body.phone) : null;
+  if (req.body.phone && !phone) return res.status(400).json({ error: 'Invalid phone number.' });
   try {
     const ocr = await recognize(req.file.path);
     const { best, matches } = searchText(ocr.text, query);
+    const sms = phone ? await sendReport(phone, query, best) : null;
     res.json({
       query,
       file: req.file.filename,
@@ -75,6 +87,7 @@ app.post('/api/search', upload.single('image'), async (req, res) => {
       matches: matches.map(({ segments, ...m }) => m),
       ocrConfidence: Math.round(ocr.confidence),
       ocrText: ocr.text,
+      sms,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

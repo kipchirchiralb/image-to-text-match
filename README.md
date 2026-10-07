@@ -1,12 +1,13 @@
 # OCR + Fuzzy Search (no LLM)
 
-Upload an image, type the text you are looking for, and get back a **match percentage**.
+Upload an image, type the text you are looking for and a phone number, and get back a **match percentage** on screen plus a short **SMS report** to that phone.
 
 - **[Tesseract.js](https://github.com/naptha/tesseract.js)** reads the text out of the image (OCR).
 - **[fuzzy](https://www.npmjs.com/package/fuzzy)** finds the closest match to your search text inside that OCR output and scores it.
 - **Express + EJS** serve a small web UI, and **Multer** handles the upload.
+- **[TextSMS](https://textsms.co.ke)** sends the SMS report.
 
-There is no LLM and no generative AI. OCR runs on a small, task-specific neural network that ships with Tesseract and runs locally. There is no API key, no per-request cost, and no data leaves your server. See [Is this AI?](#is-this-ai) for the details.
+There is no LLM and no generative AI. OCR runs on a small, task-specific neural network that ships with Tesseract and runs locally. OCR and matching need no API key and have no per-request cost. The image never leaves your server. The only thing sent out is the short SMS report text, through TextSMS. See [Is this AI?](#is-this-ai) for the details.
 
 ---
 
@@ -18,11 +19,12 @@ There is no LLM and no generative AI. OCR runs on a small, task-specific neural 
 4. [Why OCR + fuzzy matching instead of an LLM](#why-ocr--fuzzy-matching-instead-of-an-llm)
 5. [When this works well, and when it does not](#when-this-works-well-and-when-it-does-not)
 6. [How the match percentage is calculated](#how-the-match-percentage-is-calculated)
-7. [API](#api)
-8. [Project structure](#project-structure)
-9. [Configuration](#configuration)
-10. [Improving accuracy](#improving-accuracy)
-11. [Troubleshooting](#troubleshooting)
+7. [SMS report (TextSMS)](#sms-report-textsms)
+8. [API](#api)
+9. [Project structure](#project-structure)
+10. [Configuration](#configuration)
+11. [Improving accuracy](#improving-accuracy)
+12. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -32,10 +34,11 @@ Requirements: Node.js 18 or newer (tested on Node 24).
 
 ```bash
 npm install
-npm start          # or: npm run dev  (auto-restarts on file changes)
+cp .env.example .env   # then put your TextSMS API key and partner ID in .env
+npm start              # or: npm run dev  (auto-restarts on file changes)
 ```
 
-Open <http://localhost:3000>, choose an image, type a search phrase such as `Date of Birth`, and submit.
+Open <http://localhost:3000>, choose an image, type a search phrase such as `Date of Birth`, enter a phone number, and submit.
 
 > **First run needs internet.** Tesseract.js downloads the trained English OCR model (`eng.traineddata`, about 10 MB) the first time it runs and caches it in the project folder. After that it works offline.
 
@@ -58,6 +61,7 @@ Open <http://localhost:3000>, choose an image, type a search phrase such as `Dat
 2. **OCR.** One Tesseract.js worker is created on the first request and reused for every request after that, which avoids reloading the OCR model each time.
 3. **Search.** The OCR text is split into lines. Your query is compared against each full line, and against word windows inside each line that are about the same length as your query. That way, searching for `john kamau` on the line `FULL NAMES: JOHN KAMAU MWANGI` scores the `JOHN KAMAU` part, not the whole line.
 4. **Score and respond.** Each line's best candidate gets a 0–100% score. The page shows the best match with the matched characters highlighted, a ranked table of all matches above 30%, the uploaded image, and the raw OCR text.
+5. **SMS report.** A one-line summary of the best match is sent to the phone number through TextSMS. The results page shows whether the SMS was sent and the exact text.
 
 ---
 
@@ -178,6 +182,42 @@ Only matches at or above 30% are listed. A rough guide for setting thresholds: *
 
 ---
 
+## SMS report (TextSMS)
+
+After each search, the app sends a single SMS (160 characters or fewer) to the phone number entered on the form. Examples:
+
+```
+OCR search "date of birth": 100% match. Found "DATE OF BIRTH:" on line 3.
+OCR search "passport": no match found in the image.
+```
+
+Long search phrases and matches are shortened with `...` so the message always fits in one SMS.
+
+### Setting up TextSMS
+
+1. Sign in to your [TextSMS](https://textsms.co.ke) account and copy your **API key** and **Partner ID**.
+2. Copy `.env.example` to `.env` and set `TEXTSMS_API_KEY` and `TEXTSMS_PARTNER_ID`.
+3. Set `TEXTSMS_SENDER_ID` to your approved sender ID or shortcode.
+4. Restart the server and run a search. SMS is charged per message.
+
+The sending code lives in `textsms.js` (`sendTextSMS`), and `src/sms.js` uses it.
+
+### Phone numbers
+
+Numbers are converted to international format before sending. With `DEFAULT_COUNTRY_CODE=254`, all of these become `+254712345678`:
+
+```
+0712345678   +254 712 345 678   254712345678   00254712345678
+```
+
+An invalid number stops the request with an error before OCR runs.
+
+### If the SMS fails
+
+The search still completes. The results page, or the `sms` field in the API response, shows the error from TextSMS. An SMS failure never hides the match result.
+
+---
+
 ## API
 
 The same search is available as JSON for scripts and other services.
@@ -188,9 +228,10 @@ The same search is available as JSON for scripts and other services.
 |---|---|---|
 | `image` | file | The image to read. PNG, JPG, JPEG, BMP, WEBP, TIF, TIFF, or GIF. Max 10 MB. |
 | `query` | text | The text to look for. |
+| `phone` | text | Optional. If present, the SMS report is sent to this number. |
 
 ```bash
-curl -F "image=@./id-card.png" -F "query=date of birth" http://localhost:3000/api/search
+curl -F "image=@./id-card.png" -F "query=date of birth" -F "phone=0712345678" http://localhost:3000/api/search
 ```
 
 Response:
@@ -206,13 +247,21 @@ Response:
     { "percent": 100, "matchedText": "DATE OF BIRTH:", "line": "DATE OF BIRTH: 12.03.1990", "lineNumber": 3 }
   ],
   "ocrConfidence": 91,
-  "ocrText": "REPUBLIC OF KENYA\nFULL NAMES: JOHN KAMAU MWANGI\nDATE OF BIRTH: 12.03.1990\n..."
+  "ocrText": "REPUBLIC OF KENYA\nFULL NAMES: JOHN KAMAU MWANGI\nDATE OF BIRTH: 12.03.1990\n...",
+  "sms": {
+    "sent": true,
+    "to": "+254712345678",
+    "message": "OCR search \"date of birth\": 100% match. Found \"DATE OF BIRTH:\" on line 3.",
+    "status": "Success",
+    "cost": "KES 0.8000",
+    "messageId": "ATXid_..."
+  }
 }
 ```
 
-Errors return HTTP 400 for a missing or invalid input, and HTTP 500 if OCR fails. Both use the shape `{ "error": "message" }`.
+`sms` is `null` when no phone is given. If sending fails, `sms.sent` is `false` and `sms.error` holds the reason. Errors return HTTP 400 for a missing or invalid input, and HTTP 500 if OCR fails. Both use the shape `{ "error": "message" }`.
 
-The browser form posts to **`POST /search`** with the same fields and renders an HTML results page.
+The browser form posts to **`POST /search`** with the same fields and renders an HTML results page. On the form, the phone number is required.
 
 ---
 
@@ -221,25 +270,39 @@ The browser form posts to **`POST /search`** with the same fields and renders an
 ```
 .
 ├── app.js              Express server and routes (/, /search, /api/search)
+├── .env.example        Template for .env (TextSMS credentials, port)
+├── textsms.js          TextSMS API call (sendTextSMS)
 ├── src/
 │   ├── upload.js       Multer config: disk storage, unique filenames, image filter, 10 MB limit
 │   ├── ocr.js          Tesseract.js worker, created once and reused
-│   └── search.js       Fuzzy matching, scoring, and highlighting
+│   ├── search.js       Fuzzy matching, scoring, and highlighting
+│   └── sms.js          TextSMS wrapper, phone normalisation, SMS report text
 ├── views/
-│   ├── index.ejs       Upload form with image preview
-│   ├── result.ejs      Match percentage, highlighted matches, raw OCR text
+│   ├── index.ejs       Upload form (image, search text, phone) with image preview
+│   ├── result.ejs      Match percentage, SMS status, highlighted matches, raw OCR text
 │   └── partials-head.ejs
 ├── public/style.css    Styles, including dark mode
-└── uploads/            Stored images (git-ignored)
+└── uploads/            Stored images (git-ignored, not served over HTTP)
 ```
 
 ---
 
 ## Configuration
 
+Environment variables live in `.env`. Copy `.env.example` to start. `.env` is git-ignored, so your key is never committed.
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `PORT` | Web server port | `3000` |
+| `TEXTSMS_API_KEY` | TextSMS API key | required for SMS |
+| `TEXTSMS_PARTNER_ID` | TextSMS partner ID | required for SMS |
+| `TEXTSMS_SENDER_ID` | Approved sender ID or shortcode | `TextSMS` |
+| `DEFAULT_COUNTRY_CODE` | Turns local numbers like `0712...` into `+254712...` | empty |
+
+Other settings live in code:
+
 | Setting | Where | Default |
 |---|---|---|
-| Port | `PORT` environment variable | `3000` |
 | Max upload size | `limits.fileSize` in `src/upload.js` | 10 MB |
 | Allowed extensions | `ALLOWED` in `src/upload.js` | common image types |
 | OCR language | `createWorker('eng')` in `src/ocr.js` | English |
@@ -267,4 +330,7 @@ Most bad results come from bad OCR, not from the fuzzy step. Open "Raw OCR text"
 - **"Only image files are allowed".** The file extension or MIME type was not an accepted image type. PDFs are not supported. Convert PDF pages to images first.
 - **"Image is too large".** The file is over 10 MB. Resize it, or raise the limit in `src/upload.js`.
 - **Match is 0% but the text is clearly in the image.** Check the raw OCR text. If OCR misread more than one character in a short word, try a shorter or more distinctive query, or improve the image.
+- **SMS fails with an authentication error.** TextSMS rejected the API key or partner ID. Copy both again from your TextSMS dashboard and restart the server after editing `.env`.
+- **SMS fails with a sender ID error.** `TEXTSMS_SENDER_ID` must be a sender ID approved on your TextSMS account.
+- **"SMS is not configured".** `TEXTSMS_API_KEY` or `TEXTSMS_PARTNER_ID` is missing. Create `.env` from `.env.example`.
 - **Disk filling up.** Uploaded images are kept in `uploads/`. Delete them on a schedule, or delete each file after processing if you do not need to keep it.

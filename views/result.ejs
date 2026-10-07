@@ -32,6 +32,17 @@
       </div>
     </div>
 
+    <% if (sms) { %>
+      <div class="sms <%= sms.sent ? 'sent' : 'failed' %>">
+        <% if (sms.sent) { %>
+          <strong>SMS sent to <%= sms.to %></strong><% if (sms.cost) { %> <span class="muted">(<%= sms.cost %>)</span><% } %>
+        <% } else { %>
+          <strong>SMS to <%= sms.to %> failed:</strong> <%= sms.error %>
+        <% } %>
+        <div class="sms-text">&ldquo;<%= sms.message %>&rdquo;</div>
+      </div>
+    <% } %>
+
     <div class="grid">
       <div>
         <img src="<%= imageUrl %>" alt="Uploaded image" class="preview">

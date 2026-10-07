@@ -8,7 +8,7 @@
   <main class="card">
     <h1>OCR + Fuzzy Search</h1>
     <p class="muted">
-      Upload an image, type the text you are looking for, and get a match percentage.
+      Upload an image, type the text you are looking for, and get a match percentage on screen and by SMS.
       No LLM: Tesseract.js reads the image and <code>fuzzy</code> scores the match.
     </p>
 
@@ -22,6 +22,10 @@
 
       <label>Text to search for
         <input type="text" name="query" value="<%= query %>" placeholder="e.g. Date of Birth" required>
+      </label>
+
+      <label>Phone number for the SMS report
+        <input type="tel" name="phone" value="<%= phone %>" placeholder="e.g. +254712345678 or 0712345678" autocomplete="tel" required>
       </label>
 
       <button type="submit" id="btn">Upload &amp; search</button>

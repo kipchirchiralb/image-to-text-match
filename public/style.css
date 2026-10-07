@@ -80,6 +80,7 @@ form { display: grid; gap: 18px; max-width: 560px; margin-top: 20px; }
 label { display: grid; gap: 6px; font-weight: 600; }
 
 input[type=text],
+input[type=tel],
 input[type=file] {
   width: 100%;
   padding: 11px 12px;
@@ -90,6 +91,7 @@ input[type=file] {
   font: inherit;
 }
 input[type=text]:focus,
+input[type=tel]:focus,
 input[type=file]:focus {
   outline: none;
   border-color: var(--accent);
@@ -217,3 +219,15 @@ pre {
   td:last-child::before { content: "Line "; color: var(--muted); }
   td:last-child { color: var(--muted); font-size: .85rem; }
 }
+
+/* ---------- SMS status ---------- */
+.sms {
+  margin: -12px 0 28px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--good);
+  background: var(--card);
+}
+.sms.failed { border-left-color: var(--bad); }
+.sms-text { margin-top: 6px; color: var(--muted); font-size: .9rem; }
